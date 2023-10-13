@@ -197,5 +197,6 @@ Motion Matching使用的动画数据大多来自动作捕捉，为了尽量高�
 [introducing-learned-motion-matching](https://montreal.ubisoft.com/en/introducing-learned-motion-matching/) 中文翻译：[Motion Matching的发展回顾](https://zhuanlan.zhihu.com/p/611573006)
 [简单聊聊Motion Matching](https://zhuanlan.zhihu.com/p/378189446)
 [Games105-计算机角色动画-06](https://www.bilibili.com/video/BV1GG4y1p7fF?p=6&vd_source=93b215eab72b2548f75d0772e28f8b20)
+[2018GDC-Character Control with Neural Networks and Machine Learning](https://www.youtube.com/watch?v=o-QLSjSSyVk&t=254s)
 
 

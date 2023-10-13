@@ -1,8 +1,8 @@
 ---
-title: 腾讯游戏客户端公开课-UE入门
+title: Unreal-引擎源码编译和打包
 date: 2023-09-12
 index_img: "/img/bg/ue5.jpg"
-tags: [游戏客户端公开课]
+tags: [虚幻引擎]
 categories: 
    -[客户端]
 ---
@@ -57,6 +57,9 @@ git checkout 5.2.1-release
 创建完成之后会自动打开VS2022，显示刚刚创建的项目工程，右键项目名称，点击生成：
 ![](/article_img/2023-09-12-10-47-44.png)
 对于第三人称模板来说大约需要几分钟，之后就可以在虚幻编辑器中找到该项目；
+
+参考[《UE4开发笔记》Tip 1 编译完全指南](https://zhuanlan.zhihu.com/p/509308558)发现，如果将 **%UnrealEngine%\Engine\Build** 目录下的 **SourceDistribution.txt** 文件改名为 **InstalledBuild.txt** 就不需要再在VS中手动点击生成了，会和直接下载UE一样直接打开项目（这两个文件都是空的，可以放心改名），具体原理参考上面的文章。
+![](/article_img/2023-09-14-14-20-23.png)
 
 打开项目之后，由于我们想要打包到安卓平台，为了保证开发中和最后在手机上运行效果一致，我们需要设置预览渲染级别（第一次设置之后编译shader需要一段时间）：
 ![](/article_img/2023-09-12-10-58-00.png)
