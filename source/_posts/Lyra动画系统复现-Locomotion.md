@@ -9,10 +9,6 @@ categories:
 
 <!-- more -->
 
-[UE5 骨骼动画 Lyra 距离匹配 速度匹配](https://zhuanlan.zhihu.com/p/572811605)
-[Distance Matching in UE5](https://zhuanlan.zhihu.com/p/574219921)
-[官方文档](https://docs.unrealengine.com/5.0/zh-CN/distance-matching-in-unreal-engine/)
-
 # 距离匹配（Distance Matching）
 
 距离匹配是一种避免**胶囊体速度与动画根运动速度不匹配**造成的滑步等现象的技术；我们人类在运动的时候几乎不会是匀速运动或者匀加速运动，因此动捕出来的动画数据的加速度也不是匀速的，而由程序驱动的胶囊体的加速是匀速的，就会造成速度与动画不匹配，产生滑步现象：
@@ -146,3 +142,15 @@ if (!FMath::IsNearlyZero(AnimLength))
 这里要注意，不要使用CharacterMovementComp中的速度值作为真实移动速度，经测试，在加速和减速过程中速度值和真实移动速度不同：
 ![](/article_img/2024-01-03-13-02-30.png)
 因此要重新根据位置计算一个位移速度。
+
+# 跨步扭曲（Stride Warping）
+
+
+
+# 朝向扭曲（Orientation Warping）
+
+# 参考
+
+[UE5 骨骼动画 Lyra 距离匹配 速度匹配](https://zhuanlan.zhihu.com/p/572811605)
+[Distance Matching in UE5](https://zhuanlan.zhihu.com/p/574219921)
+[官方文档](https://docs.unrealengine.com/5.0/zh-CN/distance-matching-in-unreal-engine/)

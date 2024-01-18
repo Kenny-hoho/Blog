@@ -124,4 +124,41 @@ iterator_traits的实现使用了 **范围偏特化**，有一个基础的泛化
 5. 两个迭代器之间的最大距离 **difference_type**
 ![](/article_img/2023-12-23-17-01-53.png)
 
+## iterator_category
+
+在上面介绍iterator_traits时我们看到**iterator_traits**要回答当前**迭代器类型iterator_category**，迭代器类型有以下五种：
+![](/article_img/2024-01-14-13-32-00.png)
+针对不同的容器其迭代器类型也不同，**反应该容器的迭代器访问性质**:
+1. 数组Array：random_access_iterator_tag 随机访问
+2. Vector：random_access_iterator_tag
+3. Deque：random_access_iterator_tag
+4. List：bidirectional_iterator_tag 双向前进（不能随机访问）
+5. Forward-List：forward_iterator_tag 单向前进
+6. Set/MultiSet：bidirectional_iterator_tag
+7. Map/MultiMap：bidirectional_iterator_tag
+8. Unordered Set/MultiSet：forward_iterator_tag
+9. Unordered Map/MultiMap：forward_iterator_tag
+
+iterator_tag有什么用呢，如有算法希望知道两个迭代器之间的距离，这就需要知道迭代器的类型，如果迭代器类型是**random_access_iterator_tag** 支持随机访问，也就是连续存储，就可以直接相减，若不是则就只能步进并计数。同理，如有算法希望前进迭代器也需要根据不同的迭代器类型选择适合的前进策略：
+![](/article_img/2024-01-14-13-43-02.png) | ![](/article_img/2024-01-14-13-54-29.png)
+---|---
+
+思考：为什么迭代器类型本身不使用枚举来实现，反而用类通过继承来实现？
+
+其实看上面两个算法的代码我们就可以看出，使用类实现不需要为每个类型都写一个函数实现，而可以使用基类参数；
+
+# 算法
+
+![](/article_img/2024-01-14-13-22-40.png)
+
+**算法是一个函数模板**；算法是用来操作数据的，但是算法对存放数据的容器的实现一无所知（也完全不需要了解），只能通过**iterator迭代器**得到想要的数据，上面在迭代器章节我们了解到，迭代器通过**iterator_traits**为算法提供信息，如**iterator_category**，**difference_type**等信息，来方便算法根据不同的数据类型选择不同的算法，以提高效率。
+
+算法的形态大致如下，都是模板函数，并且都有两个迭代器参数：
+```C++
+template<typename Iterator>
+std::Algorithm(Iterator itr1, Iterator itr2, ...){
+   ...
+}
+```
+
 
