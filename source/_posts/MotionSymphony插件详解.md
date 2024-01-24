@@ -281,15 +281,7 @@ int32 FAnimNode_MotionMatching::GetLowestCostPoseId(FPoseMotionData& NextPose)
 
 看完**GetLowestCostPoseId**函数，我们可以就总结出Motion Symphony使用的匹配算法了！
 
-$$
-\begin{aligned}
-Cost&=(Cost_{BodyMomentum}+Cost_{Trajectory}+Cost_{Pose})*Favour\\
-    &=\{[Dist(localVelocity)*Weight_{localVelocity}+Dist(rotationalVelocity)*Weight_{rotation}]\\
-    &+[\sum_{i=0}^{n}Dist(TrajectoryPosition)*Weight_{TrajectoryPosition}+\sum_{i=0}^{n}Dist(TrajectoryRotation)*Weight_{facing}]\\
-    &+[\sum_{i=0}^{n}Dist(BoneVelocity)*Weight_{BoneVelocity}+\sum_{i=0}^{n}Dist(BonePosstion)*Weight_{BonePosition}]\}\\
-    &*Favour
-\end{aligned}
-$$
+![](/article_img/2024-01-24-20-32-52.png)
 
 # Debug工具
 
