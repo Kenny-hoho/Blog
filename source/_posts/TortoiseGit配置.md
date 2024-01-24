@@ -12,7 +12,7 @@ categories:
 # git bash端口22报错解决方法
 
 原因应该是端口22被禁用了，更换端口443，到 **/.ssh** 添加一个config文件（可以从别的地方复制一个config），在其中填写：
-```C++
+```
 Host github.com
 Hostname ssh.github.com
 Port 443
@@ -35,3 +35,12 @@ User git
 ![](/article_img/2024-01-18-14-08-11.png)
 
 完成！可以正常使用TortoiseGit！
+
+# 报错no matching host key type found. Their offer: ssh-rsa
+
+原因就是新的ssh客户端不支持ssh-rsa算法，要修改本地配置重新使用ssh-rsa算法。需要在.ssh文件夹中的config中添加如下代码：
+```
+Host *
+HostkeyAlgorithms +ssh-rsa
+PubkeyAcceptedKeyTypes +ssh-rsa
+```
