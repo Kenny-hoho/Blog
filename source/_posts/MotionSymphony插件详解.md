@@ -35,6 +35,272 @@ Motion Symphony定义了许多数据结构来方便之后的动画节点计算�
 之后在 **FAnimNode_MotionMatching::Evaluate_AnyThread(FPoseContext& Output)** 函数中通过BlendChannels数组选择播放的动画帧：
 ![](/article_img/2024-01-23-17-03-19.png)
 
+# 数据库构建（PreProcess）
+
+![](/article_img/2024-02-21-17-06-19.png)
+
+自定义资产Motion Data就是动画数据库，Motion Symphony的思路是把不同类型的动画单独做成一个Motion Data（比如跑步动画构成一个Motion Data，走路动画构成另一个Motion Data），再用状态机实现各个状态间的过渡，这种方式可以显著提高MM的效率和准确度，因为要搜索的数据库变小了。
+
+## PreProcess框架
+
+如上图，配置好一个Motion Data的源动画和Calibration和Config后，要点击**PreProcess**，进行预处理，**把动画数据库处理成特征数据库**，减少存储大小；Motion Data中最重要的变量是**Poses**，其中并不存储整个Pose而是存储Pose的特征，PoseId，AnimType，NextPoseId等等信息；
+![](/article_img/2024-02-21-17-21-04.png)
+
+这一步操作由 **void UMotionDataAsset::PreProcess()** 函数完成（只展示核心代码）：
+```C++
+void UMotionDataAsset::PreProcess()
+{
+	MotionMatchConfig->Initialize();
+
+	//Setup mirroring data
+	ClearPoses();
+
+	//依次处理选择的Animation Sequences
+	for (int32 i = 0; i < SourceMotionAnims.Num(); ++i)
+	{
+		// 先处理一遍未镜像的
+		PreProcessAnim(i, false);
+		
+		if (MirroringProfile != nullptr && SourceMotionAnims[i].bEnableMirroring)
+		{   // 如果镜像再处理一遍镜像的
+			PreProcessAnim(i, true);
+		}
+	}
+
+	/*
+	Blend Spaces预处理，和上面一样只是调用的预处理函数针对Blend Space
+
+	Composites预处理，同理
+	*/
+	
+
+	// 生成NextPoseId和LastPoseId，需要对循环动画进行一些处理
+	GeneratePoseSequencing();
+
+	//Standard deviations
+	//First Find a list of traits 
+	TArray<FMotionTraitField> UsedMotionTraits;
+	for (int32 i = 0; i < Poses.Num(); ++i)
+	{
+		UsedMotionTraits.AddUnique(Poses[i].Traits);
+	}
+
+	FeatureStandardDeviations.Empty(UsedMotionTraits.Num());
+	// 根据不同的Traits选择不同的权重信息，但是一般也不用Traits进行分类
+	for (const FMotionTraitField& MotionTrait : UsedMotionTraits)
+	{
+		FCalibrationData& NewCalibrationData = FeatureStandardDeviations.Add(MotionTrait, FCalibrationData(this));
+		NewCalibrationData.GenerateStandardDeviationWeights(this, MotionTrait);
+	}
+	PreprocessCalibration->Initialize();
+
+	// 设置优化模块，在搜索时会根据优化模块减少搜索总数
+	if(bOptimize && OptimisationModule)
+	{
+		OptimisationModule->BuildOptimisationStructures(this);
+		bIsOptimised = true;
+	}
+	else
+	{
+		bIsOptimised = false;
+	}
+	bIsProcessed = true;
+}
+```
+上面源码概况下来就是先根据不同的源动画类型分别生成**特征（MotionPoseData构成的Poses数组）**，再构建起这些特征的**顺序关系**，最后**设置优化模块**，这里调用的构建优化结构的函数作用是做检查，检查优化模块是否有效；
+
+可以看出进行PreProcess的核心函数是 **void UMotionDataAsset::PreProcessAnim(const int32 SourceAnimIndex, const bool bMirror)**，下面看看这个函数的源码：
+```C++
+void UMotionDataAsset::PreProcessAnim(const int32 SourceAnimIndex, const bool bMirror /*= false*/)
+{
+	// 得到MotionAnim，该变量继承自 FMotionAnimAsset，其中包含了动画序列本身以及一些其他的属性如是否循环等，这些属性可以在MotionData资产编辑器中设置；
+	FMotionAnimSequence& MotionAnim = SourceMotionAnims[SourceAnimIndex];
+	UAnimSequence* Sequence = MotionAnim.Sequence;
+
+	MotionAnim.AnimId = SourceAnimIndex;
+
+	const float AnimLength = Sequence->GetPlayLength();
+	float CurrentTime = 0.0f;
+	// TimeHorizon用来判断某一个动画帧能否使用，其值为轨迹预测中的最大值
+	float TimeHorizon = MotionMatchConfig->TrajectoryTimes.Last();
+	
+	FMotionTraitField AnimTraitHandle = UMMBlueprintFunctionLibrary::CreateMotionTraitFieldFromArray(MotionAnim.TraitNames);
+
+	// PoseInterval太小没必要且影响性能
+	if(PoseInterval < 0.01f)
+		PoseInterval = 0.05f;
+	
+	int32 StartPoseId = Poses.Num();
+	int32 EndPoseId = StartPoseId;
+	// 进入循环，CurrentTime每循环加PoseInterval
+	while (CurrentTime <= AnimLength)
+	{
+		// 当前帧的PoseId为Poses的个数，可以看出PoseId在每个Motion Data中都是从0开始的（因为Motion Data就是一个数据库，PoseId在同一个数据库中不同即可）
+		int32 PoseId = Poses.Num();
+		EndPoseId = PoseId;
+		// 如果CurrentTime位于动画序列的开头或者结尾的TimeHorizon区域中，意味着其不能支持完整的轨迹预测，就标记为不可使用
+		bool bDoNotUse = ((CurrentTime < TimeHorizon) && (MotionAnim.PastTrajectory == ETrajectoryPreProcessMethod::IgnoreEdges))
+			|| ((CurrentTime > AnimLength - TimeHorizon) && (MotionAnim.FutureTrajectory == ETrajectoryPreProcessMethod::IgnoreEdges))
+			? true : false;
+
+		// 如果是循环则没有上面的顾虑，永远可以支持完整的轨迹预测
+		if(MotionAnim.bLoop)
+		{
+			bDoNotUse = false;
+		}
+
+		FVector RootVelocity;
+		float RootRotVelocity;
+		// 提取根速度
+		FMMPreProcessUtils::ExtractRootVelocity(RootVelocity, RootRotVelocity, Sequence, CurrentTime, PoseInterval);
+
+		if (bMirror)
+		{
+			RootVelocity.X *= -1.0f;
+			RootRotVelocity *= -1.0f;
+		}
+
+		float PoseCostMultiplier = MotionAnim.CostMultiplier;
+
+		// 根据以上计算构建一个PoseMotionData，也就是Poses中的元素，之后要加入到Poses数组中；
+		FPoseMotionData NewPoseData = FPoseMotionData(PoseId, EMotionAnimAssetType::Sequence, 
+			SourceAnimIndex, CurrentTime, PoseCostMultiplier, bDoNotUse, bMirror, 
+			RootRotVelocity, RootVelocity, AnimTraitHandle);
+		
+		//Process trajectory for pose  计算轨迹
+		for (int32 i = 0; i < MotionMatchConfig->TrajectoryTimes.Num(); ++i)
+		{
+			FTrajectoryPoint Point;
+
+			if (MotionAnim.bLoop)
+			{
+				FMMPreProcessUtils::ExtractLoopingTrajectoryPoint(Point, Sequence, CurrentTime, MotionMatchConfig->TrajectoryTimes[i]);
+			}
+			else
+			{
+				float PointTime = MotionMatchConfig->TrajectoryTimes[i];
+
+				if (PointTime < 0.0f)
+				{
+					//past Point
+					FMMPreProcessUtils::ExtractPastTrajectoryPoint(Point, Sequence, CurrentTime, PointTime,
+						MotionAnim.PastTrajectory, MotionAnim.PrecedingMotion);
+				}
+				else
+				{
+					FMMPreProcessUtils::ExtractFutureTrajectoryPoint(Point, Sequence, CurrentTime, PointTime,
+						MotionAnim.FutureTrajectory, MotionAnim.FollowingMotion);
+				}
+			}
+		
+			if (MotionAnim.bFlattenTrajectory)
+			{
+				Point.Position.Z = 0.0f;
+			}
+
+			if (bMirror)
+			{
+				Point.Position.X *= -1.0f;
+				Point.RotationZ *= -1.0f;
+			}
+
+			// 将计算出的轨迹点添加到轨迹中
+			NewPoseData.Trajectory.Add(Point);
+		}
+
+		const FReferenceSkeleton& RefSkeleton = Sequence->GetSkeleton()->GetReferenceSkeleton();
+
+		//Process joints for pose 提取姿势信息
+		for (int32 i = 0; i < MotionMatchConfig->PoseBones.Num(); ++i)
+		{
+			FJointData JointData;
+
+			if (bMirror)
+			{
+				FName BoneName = MotionMatchConfig->PoseBones[i].BoneName;
+				FName MirrorBoneName = MirroringProfile->FindBoneMirror(BoneName);
+				
+				const int32 MirrorBoneIndex = RefSkeleton.FindBoneIndex(MirrorBoneName);
+
+				FMMPreProcessUtils::ExtractJointData(JointData, Sequence, MirrorBoneIndex, CurrentTime, PoseInterval);
+
+				JointData.Position.X *= -1.0f;
+				JointData.Velocity.X *= -1.0f;
+			}
+			else
+			{
+				FMMPreProcessUtils::ExtractJointData(JointData, Sequence, MotionMatchConfig->PoseBones[i], CurrentTime, PoseInterval);
+			}
+			
+			// 加入到NewPoseData中
+			NewPoseData.JointData.Add(JointData);
+		}
+		
+		// 添加到Poses数组中，也就是完成了数据库中的一个动画帧的预处理
+		Poses.Add(NewPoseData);
+		CurrentTime += PoseInterval;
+	}
+
+	//PreProcess Tags 处理Tag
+	for (FAnimNotifyEvent& NotifyEvent : MotionAnim.Tags)
+	{
+		UTagSection* TagSection = Cast<UTagSection>(NotifyEvent.NotifyStateClass);
+		if (TagSection)
+		{
+			float TagStartTime = NotifyEvent.GetTriggerTime();
+
+			//Pre-process the tag itself
+			TagSection->PreProcessTag(MotionAnim, this, TagStartTime, TagStartTime + NotifyEvent.Duration);
+
+			//Find the range of poses affected by this tag
+			int32 TagStartPoseId = StartPoseId + FMath::RoundHalfToEven(NotifyEvent.GetTriggerTime() / PoseInterval);
+			int32 TagEndPoseId = StartPoseId + FMath::RoundHalfToEven((NotifyEvent.GetTriggerTime() + NotifyEvent.Duration) / PoseInterval);
+
+			TagStartPoseId = FMath::Clamp(TagStartPoseId, 0, Poses.Num());
+			TagEndPoseId = FMath::Clamp(TagEndPoseId, 0, Poses.Num());
+
+			TagStartTime = NotifyEvent.GetTriggerTime();
+			float TagEndTime = TagStartTime + NotifyEvent.GetDuration();
+
+			//Apply the tags pre-processing to all poses in this range 这里的PreProcessPose又不同的Tag子类实现，如DoNotUse的Tag就是标记这些Pose为DoNotUse
+			for (int32 PoseIndex = TagStartPoseId; PoseIndex < TagEndPoseId; ++PoseIndex)
+			{
+				TagSection->PreProcessPose(Poses[PoseIndex], MotionAnim, this, TagStartTime, TagEndTime);
+			}
+
+			continue; //Don't check for a tag point if we already know its a tag section
+		}
+		
+		// TagPoint就是那种只有一个点的动画通知
+		UTagPoint* TagPoint = Cast<UTagPoint>(NotifyEvent.Notify);
+		if (TagPoint)
+		{
+			float TagTime = NotifyEvent.GetTriggerTime();
+			int32 TagClosestPoseId = StartPoseId + FMath::RoundHalfToEven(TagTime / PoseInterval);
+			TagClosestPoseId = FMath::Clamp(TagClosestPoseId, 0, Poses.Num());
+
+			TagPoint->PreProcessTag(Poses[TagClosestPoseId], MotionAnim, this, TagTime);
+		}
+	}
+
+#endif
+}
+```
+
+概括PreProcessAnim函数就是先提取基础信息，之后通过定义在 **FMMPreProcessUtils** 中的一系列工具函数提取**速度信息**，**轨迹信息**和**关节信息**，最后**处理Tag**；那么我们也需要了解一下具体是怎样提取这些信息的，以后如果加入我们自己关注的信息，就可以使用类似的方法提取；
+
+## FMMPreProcessUtils中的工具函数
+
+1. 提取根位移速度和根旋转速度：调用了动画序列自带的提取根运动的函数，计算出根位移速度和根旋转速度；
+   ![](/article_img/2024-02-21-19-05-09.png)
+2. 提取轨迹点位置和朝向，分为三个不同的函数：循环，提取过去的，提取未来的；
+   循环就直接根据时间没有调用提取根运动的函数：
+   ![](/article_img/2024-02-21-19-08-43.png)
+   提取过去的：
+   提取未来的：
+3. 提取关节数据：
+   ![](/article_img/2024-02-21-20-03-47.png)
+
 # AnimNode（Motion Symphony中的动画节点）
 
 Motion Symphony提供了许多AnimNode来实现各种功能，其中最重要的是 **AnimNode_MotionMatching**，**AnimNode_MotionRecorder** 以及 **AnimNode_PoseMatching**，这三个节点在官方案例中均被使用：
@@ -46,6 +312,8 @@ Motion Symphony提供了许多AnimNode来实现各种功能，其中最重要的
 
 MM节点继承自 **FAnimNode_AssetPlayerBase**，SequencePlayer和SequenceEvaluator也继承自该类，因此可以感性理解MM节点就是一个复杂的SequenceEvaluator（序列求值器），求出当前要播放哪一帧；
 ![](/article_img/2024-01-23-17-07-37.png)
+继承关系：
+![](/article_img/MotionSymphonyClass.png)
 
 所有的AnimNode都继承自 **FAnimNode_Base** 类，其中有几个重要的函数 ：
 1. **Initialize_AnyThread** （节点第一次被调用时的初始化操作）
@@ -82,12 +350,10 @@ void FAnimNode_MotionMatching::ComputeCurrentPose(const FCachedMotionPose& Cache
 	int32 PoseIndex = ChosenChannel.StartPoseId;
 
 	int32 NumPosesPassed = 0;
-	if (TimePassed < 0.0f)
-	{
+	if (TimePassed < 0.0f){
 		NumPosesPassed = FMath::CeilToInt(TimePassed / PoseInterval);
 	}
-	else
-	{
+	else{
 		NumPosesPassed = FMath::FloorToInt(TimePassed / PoseInterval);
 	}
 	// 计算得到当前已选择的姿势id
@@ -97,8 +363,7 @@ void FAnimNode_MotionMatching::ComputeCurrentPose(const FCachedMotionPose& Cache
     // 对当前记录的姿势进行轨迹插值，因为正在播放的帧有可能是插值出来的，轨迹信息没有经过预处理得到
 	FMotionMatchingUtils::LerpPoseTrajectory(CurrentInterpolatedPose, *BeforePose, *AfterPose, PoseInterpolationValue);
     // 把FAnimNode_MotionRecorder中记录的姿势赋值给CurrentInterpolatedPose
-	for (int32 i = 0; i < PoseBoneRemap.Num(); ++i)
-	{
+	for (int32 i = 0; i < PoseBoneRemap.Num(); ++i){
 		const FCachedMotionBone& CachedMotionBone = CachedMotionPose.CachedBoneData[PoseBoneRemap[i]];
 		CurrentInterpolatedPose.JointData[i] = FJointData(CachedMotionBone.Transform.GetLocation(), CachedMotionBone.Velocity);
 	}
@@ -112,47 +377,36 @@ void FAnimNode_MotionMatching::UpdateMotionMatching(const float DeltaTime, const
 	TimeSinceMotionChosen += DeltaTime;
 	TimeSinceMotionUpdate += DeltaTime;
 
-    /*
-    EarlyOut
-    */
-
     // 得到负责记录姿势的MotionRecoredNode
 	FAnimNode_MotionRecorder* MotionRecorderNode = Context.GetAncestor<FAnimNode_MotionRecorder>();
 
-	if (MotionRecorderNode)
-	{   // 得到顺序播放情况下当前已选择的姿势CurrentChosenPoseId，从MotionRecoredNode中得到当前姿势CurrentInterpolatedPose
+	if (MotionRecorderNode){   
+		// 得到顺序播放情况下当前已选择的姿势CurrentChosenPoseId，从MotionRecoredNode中得到当前姿势CurrentInterpolatedPose
 		ComputeCurrentPose(MotionRecorderNode->GetMotionPose());
 	}
-	else
-	{
+	else{
 		ComputeCurrentPose();
 	}
 
 	//If we have ran into a 'DoNotUse' pose. We need to force a new pose search
-	if(CurrentInterpolatedPose.bDoNotUse)
-	{
+	if(CurrentInterpolatedPose.bDoNotUse){
 		bForcePoseSearch = true;
 	}
 
 	UMotionMatchConfig* MMConfig = MotionData->MotionMatchConfig;
 
 	//Past trajectory mode
-	if (PastTrajectoryMode == EPastTrajectoryMode::CopyFromCurrentPose)
-	{
-		for (int32 i = 0; i < MMConfig->TrajectoryTimes.Num(); ++i)
-		{
-			if (MMConfig->TrajectoryTimes[i] > 0.0f)
-			{ 
+	if (PastTrajectoryMode == EPastTrajectoryMode::CopyFromCurrentPose){
+		for (int32 i = 0; i < MMConfig->TrajectoryTimes.Num(); ++i){
+			if (MMConfig->TrajectoryTimes[i] > 0.0f){ 
 				break;
 			}
-
 			DesiredTrajectory.TrajectoryPoints[i] = CurrentInterpolatedPose.Trajectory[i];
 		}
 	}
 
     // 上次MM经过更新时间间隔或者强制进行MM
-	if (TimeSinceMotionUpdate >= UpdateInterval || bForcePoseSearch)
-	{
+	if (TimeSinceMotionUpdate >= UpdateInterval || bForcePoseSearch){
         // 重置MM更新时间
 		TimeSinceMotionUpdate = 0.0f;
         // 姿势匹配
@@ -164,27 +418,14 @@ void FAnimNode_MotionMatching::UpdateMotionMatching(const float DeltaTime, const
 ```C++
 void FAnimNode_MotionMatching::SchedulePoseSearch(float DeltaTime, const FAnimationUpdateContext& Context)
 {
-    /*
-    省略一些代码
-    */
-
 	FPoseMotionData& NextPose = MotionData->Poses[MotionData->Poses[CurrentChosenPoseId].NextPoseId];
-
-    /*
-    省略一些代码
-    */
 
 	int32 LowestPoseId = NextPose.PoseId;
 
-	switch (PoseMatchMethod)
-	{   // 根据搜索方式，分为优化和线性（优化模式不会搜索全部数据库），搜索数据库得到Cost最小的姿势id
+	switch (PoseMatchMethod){   // 根据搜索方式，分为优化和线性（优化模式不会搜索全部数据库），搜索数据库得到Cost最小的姿势id
 		case EPoseMatchMethod::Optimized: { LowestPoseId = GetLowestCostPoseId(NextPose); } break;
 		case EPoseMatchMethod::Linear: { LowestPoseId = GetLowestCostPoseId_Linear(NextPose); } break;
 	}
-
-    /*
-    省略一些DEBUG代码
-    */
 
 	FPoseMotionData& BestPose = MotionData->Poses[LowestPoseId];
 	FPoseMotionData& ChosenPose = MotionData->Poses[CurrentChosenPoseId];
@@ -194,16 +435,14 @@ void FAnimNode_MotionMatching::SchedulePoseSearch(float DeltaTime, const FAnimat
 								FMath::Abs(BestPose.Time - CurrentInterpolatedPose.Time) < 0.25f
 								&& FVector2D::DistSquared(BestPose.BlendSpacePosition, CurrentInterpolatedPose.BlendSpacePosition) < 1.0f;
     // 判断是否时ChosenPose（当前被选择的姿势）
-	if (!bWinnerAtSameLocation)
-	{
+	if (!bWinnerAtSameLocation){
 		bWinnerAtSameLocation = BestPose.AnimId == ChosenPose.AnimId &&
 								BestPose.bMirrored == ChosenPose.bMirrored &&
 								FMath::Abs(BestPose.Time - ChosenPose.Time) < 0.25f
 								&& FVector2D::DistSquared(BestPose.BlendSpacePosition, ChosenPose.BlendSpacePosition) < 1.0f;
 	}
     // 不是ChosenPose，也不是CurrentInterpolatedPose，过渡到该姿势
-	if (!bWinnerAtSameLocation)
-	{
+	if (!bWinnerAtSameLocation){
 		TransitionToPose(BestPose.PoseId, Context);
 	}
 }
@@ -216,7 +455,9 @@ int32 FAnimNode_MotionMatching::GetLowestCostPoseId(FPoseMotionData& NextPose)
     // 得到计算权重
 	FCalibrationData& FinalCalibration = FinalCalibrationSets[RequiredTraits];
     // 得到候选姿势
-	TArray<FPoseMotionData>* PoseCandidates = MotionData->OptimisationModule->GetFilteredPoseList(CurrentInterpolatedPose, RequiredTraits, FinalCalibration);
+	TArray<FPoseMotionData>* PoseCandidates = 
+	MotionData->OptimisationModule->
+	GetFilteredPoseList(CurrentInterpolatedPose, RequiredTraits, FinalCalibration);
 
 	if (!PoseCandidates)
 	{   // 没有候选姿势，也就是没有配置优化（后面讲），就线性搜索数据库
