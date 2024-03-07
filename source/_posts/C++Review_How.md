@@ -410,7 +410,7 @@ int main() {
 
 ## shared_ptr
 
-shared_ptr和unique_ptr的区别就在于它**允许复制**，这是借助**引用计数（reference count）**实现的。当shared_ptr被复制之后，引用计数也会加一，当引用计数为0时，才释放内存。
+shared_ptr和unique_ptr的区别就在于它**允许复制**，这是借助 **引用计数（reference count）** 实现的。当shared_ptr被复制之后，引用计数也会加一，当引用计数为0时，才释放内存。
 
 ```c++
 int main() {
