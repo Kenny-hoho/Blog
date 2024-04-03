@@ -680,3 +680,75 @@ TArray<FPoseMotionData>* UMMOptimisation_TraitBins::GetFilteredPoseList(const FP
 	return nullptr;
 }
 ```
+
+
+# Motion Symphony 2.0
+
+## Motion Calibration变为optional
+
+在2.0版本中，Motion Calibration变成了可选择的，不是必须的，之前1.0中需要在Motion Calibration中配置权重，而在2.0中权重被定义在Motion Config中；
+![](/article_img/2024-04-03-09-55-36.png)
+
+## 输入数据更加通用
+
+在1.0中，mm需要输入一个**trajectory**，而在2.0中这个变量变成了更通用的**input data**，称为“FMotionMatchingInputData”，本质上是一个浮点数组的包装器，其中包含来自所有“输入响应”类型匹配功能的所有数据；
+![](/article_img/2024-04-03-10-03-49.png)
+使用MMBlueprint Function Library中的函数 **Construct Motion Input Feature Array** 填充Input Data。
+
+函数中会根据MotionConfig中选择的特征数据，调用各特征子类的**SourceInputData**函数：
+```C++
+int32 FeatureOffset = 0;
+for(TObjectPtr<UMatchFeatureBase> MatchFeature : MotionConfig->InputResponseFeatures)
+{
+	if(MatchFeature && MatchFeature->IsSetupValid())
+	{
+		MatchFeature->SourceInputData(InputData.DesiredInputArray, FeatureOffset, Actor);
+		FeatureOffset += MatchFeature->Size();
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("ERROR: 'ConstructMotionInputFeatureArray' node -  Match feature has an invalid setup and cannot be processed."))
+	}
+}
+```
+如下图，有这些特征类，均继承自MatchFeatureBase类，都重载SourceInputData函数实现对InputData填充不同的数据：
+![](/article_img/2024-04-03-10-42-03.png)
+如MatchFeature_Trajectory2D类中的覆写如下，从TrajectoryGenerator中得到轨迹并填充InputData：
+```C++
+if(UTrajectoryGenerator_Base* TrajectoryGenerator = InActor->GetComponentByClass<UTrajectoryGenerator_Base>())
+{
+	const FTrajectory& Trajectory = TrajectoryGenerator->GetCurrentTrajectory();
+
+	const int32 Iterations = FMath::Min(TrajectoryTiming.Num(), Trajectory.TrajectoryPoints.Num());
+	
+	for(int32 i = 0; i < Iterations; ++i)
+	{
+		const FTrajectoryPoint& TrajectoryPoint = Trajectory.TrajectoryPoints[i];
+
+		FVector RotationVector = FQuat(FVector::UpVector,
+			FMath::DegreesToRadians(TrajectoryPoint.RotationZ)) * FVector::ForwardVector;
+		RotationVector = RotationVector.GetSafeNormal() * 100.0f;
+
+		const int32 PointOffset = FeatureOffset + (i * 4.0f);
+
+		if(PointOffset + 3 >= OutFeatureArray.Num())
+		{
+			UE_LOG(LogTemp, Error, TEXT("UMatchFeature_Trajectory2D: SourceInputData(...) - Feature does not fit in FeatureArray"));
+			return;
+		}
+		
+		OutFeatureArray[PointOffset] = TrajectoryPoint.Position.X;
+		OutFeatureArray[PointOffset + 1] = TrajectoryPoint.Position.Y;
+		OutFeatureArray[PointOffset + 2] = RotationVector.X;
+		OutFeatureArray[PointOffset + 3] = RotationVector.Y;
+	}
+}
+```
+
+## 不需要配置优化策略
+
+1.0中可以配置优化模块，例如cluster或AABB等，在2.0中废弃了这一功能，默认使用AABB进行搜索优化；
+
+## 不能显式计算各个特征Cost
+
+在2.0中由于特征可选择的更多，因此不能确定选择了那些特征，在计算cost时也就不能显示得到如轨迹cost，姿势cost等信息，而是统一对特征数组进行计算；
