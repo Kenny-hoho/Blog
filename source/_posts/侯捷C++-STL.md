@@ -161,4 +161,43 @@ std::Algorithm(Iterator itr1, Iterator itr2, ...){
 }
 ```
 
+## STL的排序算法
+
+快速排序、插入排序和堆排序；当数据量很大的时候用快排，划分区段比较小的时候用插入排序，当划分有导致最坏情况的倾向的时候使用堆排序。
+
+### 各种排序算法的原理和时间复杂度
+
+判断一个排序算法是否稳定就是看 **相同的数位置会不会变化**；
+
+![](/article_img/2024-03-02-15-03-48.png)
+
+快排代码：
+```C++
+void quickSort(int nums[], int start, int end){
+   if(start<end){
+      int base = nums[start]; // 确定基准
+      int left = start;
+      int right = end;
+      while(left<right){
+         // 先从后往前找第一个比基准小的值
+         while(left<right&&nums[right]>base){
+            right--;
+         }
+         // 找到，将其赋值给左指针
+         nums[left]=nums[right];
+         // 从前往后找第一个比基准大的值
+         while(left<right&&nums[left]<base){
+            left++;
+         }
+         // 找到，将其赋值给右指针，不用担心右指针的值会丢，已经给了左指针了，而之前的左指针就是base
+         nums[right]=nums[left];
+      }
+      // 左右指针相遇，将base赋值给当前位置
+      nums[left]=base;
+      quickSort(nums, start, left-1);
+      quickSort(nums, left+1, end);
+   }
+}
+```
+最坏情况就是没有划分，时间复杂度为O(n^2)；
 
