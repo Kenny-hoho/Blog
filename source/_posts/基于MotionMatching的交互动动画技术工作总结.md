@@ -1,3 +1,15 @@
+---
+title: 基于MotionMatching的交互动动画技术工作总结
+date: 2024-7-14
+index_img: "/img/bg/InteractionMM.png"
+tags: [计算机角色动画]
+categories: 
+   -[笔记]
+---
+
+基于MotionMatching的交互动动画技术工作总结
+<!-- more -->
+
 # 背景
 
 Motion Matching首先由Büttner和Clavet在2015年提出，该算法基于运动捕捉获得的动作数据库，用程序自动搜索最合适的下一帧，由此生成完整的动画。相比于以往主流采用的状态机动画，具有动画真实度更高、更节约人力和时间成本、能实现更高产能等特点。该算法在2016年在GDC2016由育碧正式提出，同年被应用于开发育碧的多人动作游戏荣耀战魂。之后又被应用于最后生还者，黑神话悟空等众多3A游戏中。在2021年，EA在GDC上分享了将Motion Matching与环境交互结合的技术并展示其在游戏Madden中的表现效果。2024年3月，UE5.4版本正式推出Motion Matching功能并于6月发布示例工程和相关动画数据。可以预见未来Motion Matching会被更加广泛地应用在游戏动作系统的开发中。
