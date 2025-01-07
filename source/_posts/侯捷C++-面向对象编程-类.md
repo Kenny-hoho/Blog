@@ -11,6 +11,8 @@ categories:
 
 # access level（访问级别）
 
+## 类的访问级别
+
 一般数据**都要**设置为private，需要外界调用的函数设置为public。在单例模式中，会将构造函数设置为private，确保只能有一个对象。
 
 friend关键字可以设置友元，友元可以自由取得private成员。**相同的类（class）的各种对象（objects）互为友元**。
@@ -24,6 +26,17 @@ public:
     }
 };
 ```
+
+![](/article_img/2024-08-04-19-00-08.png)
+**注意：这里的访问级别都是类的访问级别，类的对象只能直接访问public修饰的成员变量和成员函数！！！**
+
+1. public继承：基类的public成为子类的public，基类的protected成为子类的protected，**子类不能访问基类的private**
+2. protected继承：基类的**public和protected**成为子类的**protected**，**子类不能访问基类的private**
+3. private继承：基类的**public和protected**成为子类的**private**，**子类不能访问基类的private**
+
+## 类和结构体的默认情况
+
+**结构体默认为public，类默认为private！**li
 
 # 构造函数
 

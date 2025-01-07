@@ -9,6 +9,56 @@ categories:
 
 <!-- more -->
 
+# new和delete
+
+## new和malloc的区别
+
+1. **属性不同**：
+   1. new/delete是关键字，需要编译器支持。
+   2. malloc/free是库函数，需要头文件支持
+2. **参数不同**：new不需要指定分配的内存大小并且可以传入构造函数参数，malloc需要
+3. **返回类型不同**：new严格返回对象类型的指针，malloc会返回void*，需要强制类型转换；分配失败时，new抛出bac_alloc异常，malloc会返回NULL
+4. new会分配内存并调用构造函数，delete会调用析构函数并释放内存；
+
+**new和delete成对出现，new[]和delete[]成对出现**
+
+## placement new
+
+不分配内存，只调用构造函数；
+```C++
+Type* ptr = new (place) Type(args...);
+
+ptr->~Type(); // 需要手动调用析构函数
+```
+
+出现placement new的原因：
+1. 内存控制自由：可以决定对象存储的确切位置，适用于对内存布局有严格要求的场景
+2. 性能优化：避免频繁的内存分配和回收开销，适合内存池等高效内存管理策略
+3. 内存重用：在同一块内存上多次创建和销毁对象，减少内存消耗
+
+适合用来实现内存池：
+```C++
+class MemoryPool{
+private:
+    static const size_t POOL_SIZE = 1000;
+    char memory[POOL_SIZE];//预分配内存
+    void* allocate(size_t size){
+        return static_cast<void*>(memory);
+    }
+public:
+    Particle* createParticle(){
+        return new (allocate(sizeof(Particle))) Particle();
+    }
+
+    void destroyParticle(Particle* p){
+        if(p){
+            p->~Particle();//手动调用析构函数
+        }
+    }
+}
+```
+
+
 # inline（内联函数）
 
 直接定义在类中的函数不用使用 inline关键字也会成为 inline函数，相当于自动添加 inlne关键字，但是是否这个函数真的编程内联函数是完全取决于编译器的。也就是说，我们对一个函数声明他为 inline 只是**建议**编译器将其视作 inline函数，最终还是要由编译器决定（**太复杂的函数编译器没有能力将其变成内联函数**）。

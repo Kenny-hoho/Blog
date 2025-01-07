@@ -310,7 +310,7 @@ Motion Symphony提供了许多AnimNode来实现各种功能，其中最重要的
 
 ## AnimNode_MotionMatching（MM节点）
 
-MM节点继承自 **FAnimNode_AssetPlayerBase**，SequencePlayer和SequenceEvaluator也继承自该类，因此可以感性理解MM节点就是一个复杂的SequenceEvaluator（序列求值器），求出当前要播放哪一帧；
+MM节点继承自 **FAnimNode_AssetPlayerBase**，SequencePlayer和SequenceEvaluator也继承自该类，因此可以理解MM节点就是一个复杂的SequenceEvaluator（序列求值器），求出当前要播放哪一帧；
 ![](/article_img/2024-01-23-17-07-37.png)
 继承关系：
 ![](/article_img/MotionSymphonyClass.png)
